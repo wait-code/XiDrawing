@@ -43,12 +43,12 @@ python bead_pattern_tool.py
 
 ## 依赖说明
 
-核心依赖（必装）：`numpy`、`opencv-python`、`Pillow`、`scikit-learn`
+核心依赖（必装）：`numpy`、`opencv-python`、`Pillow`、`scikit-learn`、`scipy`
 
 可选依赖：
 - `pydirectinput`：仅 `auto_draw/`（废稿）使用，核心功能不需要
 
-headless 提示：在无 GUI 的服务器/容器上运行核心算法时，可把 `opencv-python` 替换为 `opencv-python-headless`（两者互斥，不可同时安装）。人脸检测（face crop）与 `auto_draw/` 依赖窗口/摄像头的能力在 headless 环境不可用。注意：`core/` 的调色板与渲染路径会强制 `import cv2`，请务必保证已安装其中之一，否则会直接 `ImportError`。
+headless 提示：在无 GUI 的服务器/容器上运行核心算法时，可把 `opencv-python` 替换为 `opencv-python-headless`（两者互斥，不可同时安装）。人脸检测（face crop）与 `auto_draw/` 依赖窗口/摄像头的能力在 headless 环境不可用。注意：`core/` 的调色板与渲染路径会强制 `import cv2`，请务必保证已安装其中之一，否则会直接 `ImportError`。`scipy` 用于固定色板批量最近邻映射（cKDTree）；未安装时自动回退到 numpy 实现，功能不受影响。
 
 ## 快速启动
 
@@ -76,9 +76,10 @@ pyinstaller -F -w -i icon.ico bead_pattern_tool.py
 
 ## 性能提示
 
-- 大尺寸图片转换会很慢：核心算法包含多次颜色空间转换、加权 KMeans、空间平滑与误差扩散循环，网格尺寸（rows/cols）与 `max_colors` 越大耗时越高。
+- 大尺寸图片转换会很慢：核心算法包含多次颜色空间转换、空间平滑与误差扩散循环，网格尺寸（rows/cols）与 `max_colors` 越大耗时越高。
 - 建议先用 24×24 或 48×48 试跑确认效果，再加大尺寸。
 - `dither` 抖动模式的误差扩散为顺序循环，相对更慢；`photo` 模式整体最轻量。
+- 固定色板（`--palette` 或 `build_catalog()`）场景已启用快速最近邻映射（`core/fast_palette_map.py`，OKLab 预计算 + cKDTree 批量查询），结果与全矩阵最近邻一致，内存占用更低。优化方案详见 `docs/PERFORMANCE_OPTIMIZATION.md`。
 - 耗时主要受输入分辨率、网格尺寸与渲染模式共同影响，可用下方基准脚本实测。
 
 ## 性能基准

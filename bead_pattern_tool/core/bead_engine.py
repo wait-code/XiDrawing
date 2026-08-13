@@ -488,9 +488,23 @@ def representative_grid(
 
 
 def assign_nearest(
-    target_oklab: np.ndarray, palette: Sequence[PaletteEntry]
+    target_oklab: np.ndarray,
+    palette: Sequence[PaletteEntry],
+    use_fast_palette: bool | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """OKLab 欧氏距离最近邻映射；固定色板场景默认走 cKDTree 快速路径。"""
     palette_rgb = np.asarray([entry.rgb for entry in palette], dtype=np.uint8)
+    if use_fast_palette is None:
+        try:
+            from .. import config
+
+            use_fast_palette = bool(config.DEFAULT_USE_FAST_PALETTE)
+        except Exception:
+            use_fast_palette = True
+    if use_fast_palette:
+        from .fast_palette_map import map_to_palette
+
+        return map_to_palette(target_oklab, palette_rgb, use_kdtree=True)
     palette_oklab = srgb_to_oklab(palette_rgb.astype(np.float32) / 255.0)
     costs = np.sum(
         (target_oklab[..., None, :] - palette_oklab[None, None, :, :]) ** 2, axis=-1
@@ -515,6 +529,18 @@ def spatial_refine(
     )
     rows, cols = labels.shape
     current = labels.copy()
+    palette_index = np.arange(len(palette))
+
+    # 预计算四方向邻域权重（exp(-delta / 0.0025)），避免循环内重复 numpy 开销。
+    # 上/下、左/右两两对称：down 复用 up，right 复用 left。
+    delta_vertical = np.sum(
+        (target_oklab[1:] - target_oklab[:-1]) ** 2, axis=-1
+    )
+    weight_vertical = np.exp(-delta_vertical / 0.0025).astype(np.float32)
+    delta_horizontal = np.sum(
+        (target_oklab[:, 1:] - target_oklab[:, :-1]) ** 2, axis=-1
+    )
+    weight_horizontal = np.exp(-delta_horizontal / 0.0025).astype(np.float32)
 
     # 相邻原图颜色接近时鼓励使用同色；跨越强边缘时自动降低平滑约束。
     for _ in range(passes):
@@ -522,18 +548,30 @@ def spatial_refine(
         for row in range(rows):
             for col in range(cols):
                 energy = data_cost[row, col].copy()
-                for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                    ny, nx = row + dy, col + dx
-                    if 0 <= ny < rows and 0 <= nx < cols:
-                        target_delta = float(
-                            np.sum((target_oklab[row, col] - target_oklab[ny, nx]) ** 2)
-                        )
-                        neighbor_weight = math.exp(-target_delta / 0.0025)
-                        energy += (
-                            strength
-                            * neighbor_weight
-                            * (np.arange(len(palette)) != previous[ny, nx])
-                        )
+                if row > 0:
+                    energy += (
+                        strength
+                        * weight_vertical[row - 1, col]
+                        * (palette_index != previous[row - 1, col])
+                    )
+                if row < rows - 1:
+                    energy += (
+                        strength
+                        * weight_vertical[row, col]
+                        * (palette_index != previous[row + 1, col])
+                    )
+                if col > 0:
+                    energy += (
+                        strength
+                        * weight_horizontal[row, col - 1]
+                        * (palette_index != previous[row, col - 1])
+                    )
+                if col < cols - 1:
+                    energy += (
+                        strength
+                        * weight_horizontal[row, col]
+                        * (palette_index != previous[row, col + 1])
+                    )
                 current[row, col] = int(np.argmin(energy))
         if np.array_equal(previous, current):
             break
@@ -545,6 +583,9 @@ def dither_assign(
 ) -> tuple[np.ndarray, np.ndarray]:
     palette_rgb = np.asarray([entry.rgb for entry in palette], dtype=np.uint8)
     palette_oklab = srgb_to_oklab(palette_rgb.astype(np.float32) / 255.0)
+    # 展开平方距离公式 ||p - x||^2 = ||p||^2 - 2 p·x + ||x||^2，避免每格构造 (P,3) 中间数组。
+    palette_oklab64 = palette_oklab.astype(np.float64)
+    palette_norm = np.sum(palette_oklab64 ** 2, axis=1)
     work = target_oklab.astype(np.float32).copy()
     rows, cols = work.shape[:2]
     labels = np.zeros((rows, cols), dtype=np.int32)
@@ -555,7 +596,12 @@ def dither_assign(
         columns = range(cols) if left_to_right else range(cols - 1, -1, -1)
         direction = 1 if left_to_right else -1
         for col in columns:
-            distances = np.sum((palette_oklab - work[row, col]) ** 2, axis=1)
+            pixel = work[row, col].astype(np.float64)
+            distances = (
+                palette_norm
+                - 2.0 * (palette_oklab64 @ pixel)
+                + float(np.sum(pixel * pixel))
+            )
             label = int(np.argmin(distances))
             labels[row, col] = label
             error = work[row, col] - palette_oklab[label]

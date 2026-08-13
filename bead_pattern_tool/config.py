@@ -42,6 +42,9 @@ MODE_CONFIG = {
     MODE_LEGACY_PORTRAIT_PRO: {"algo": "portrait_pro",     "max_colors": 40, "crop": "auto"},
 }
 
+# 性能优化开关：固定色板批量最近邻映射（cKDTree / numpy 兜底）
+DEFAULT_USE_FAST_PALETTE = True
+
 DITHER_NONE = 'none'
 DITHER_FS = 'fs'
 DITHER_ATKINSON = 'atkinson'
