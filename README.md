@@ -17,6 +17,8 @@ XiDrawing/
 ├── bead_pattern_tool.py        # 入口脚本
 ├── requirements.txt
 ├── icon.ico
+├── scripts/
+│   └── benchmark.py            # 性能基准脚本
 └── bead_pattern_tool/
     ├── config.py               # 全局配置
     ├── core/                   # 拼豆算法核心
@@ -37,6 +39,61 @@ XiDrawing/
 ```bash
 pip install -r requirements.txt
 python bead_pattern_tool.py
+```
+
+## 依赖说明
+
+核心依赖（必装）：`numpy`、`opencv-python`、`Pillow`、`scikit-learn`
+
+可选依赖：
+- `pydirectinput`：仅 `auto_draw/`（废稿）使用，核心功能不需要
+
+headless 提示：在无 GUI 的服务器/容器上运行核心算法时，可把 `opencv-python` 替换为 `opencv-python-headless`（两者互斥，不可同时安装）。人脸检测（face crop）与 `auto_draw/` 依赖窗口/摄像头的能力在 headless 环境不可用。注意：`core/` 的调色板与渲染路径会强制 `import cv2`，请务必保证已安装其中之一，否则会直接 `ImportError`。
+
+## 快速启动
+
+GUI 启动：
+
+```bash
+python bead_pattern_tool.py        # 或 python -m bead_pattern_tool
+```
+
+CLI / 脚本调用（核心算法 API）：
+
+```python
+from bead_pattern_tool.core import make_pattern
+
+grid, pix = make_pattern("input.png", n=24)  # 返回图纸图片与像素色列表
+grid.save("pattern.png")
+```
+
+PyInstaller 打包：
+
+```bash
+pip install pyinstaller
+pyinstaller -F -w -i icon.ico bead_pattern_tool.py
+```
+
+## 性能提示
+
+- 大尺寸图片转换会很慢：核心算法包含多次颜色空间转换、加权 KMeans、空间平滑与误差扩散循环，网格尺寸（rows/cols）与 `max_colors` 越大耗时越高。
+- 建议先用 24×24 或 48×48 试跑确认效果，再加大尺寸。
+- `dither` 抖动模式的误差扩散为顺序循环，相对更慢；`photo` 模式整体最轻量。
+- 耗时主要受输入分辨率、网格尺寸与渲染模式共同影响，可用下方基准脚本实测。
+
+## 性能基准
+
+`scripts/benchmark.py` 可对任意图片运行性能分析，输出每个「网格尺寸 × 渲染模式」组合的耗时表格：
+
+```bash
+# 使用你自己的图片
+python scripts/benchmark.py --image path/to/your_image.png
+
+# 指定尺寸与模式组合
+python scripts/benchmark.py --image path/to/your_image.png --sizes 24 48 96 --modes photo illustration edge dither --repeat 1
+
+# 没有现成图片时，用内置渐变测试图（--sample）快速体验
+python scripts/benchmark.py --sample --sizes 24 48
 ```
 
 ## 重要提醒
