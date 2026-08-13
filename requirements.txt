@@ -1,0 +1,6 @@
+numpy
+opencv-python
+Pillow
+scikit-learn
+# auto_draw（废稿）使用，可选
+pydirectinput
